@@ -1,0 +1,12 @@
+{
+  "/jira-api": {
+    "target": "https://jira.lenta.com",
+    "secure": true,
+    "changeOrigin": true,
+    "logLevel": "debug",
+    "pathRewrite": {
+      "^/jira-api": ""
+    }
+  }
+}
+
