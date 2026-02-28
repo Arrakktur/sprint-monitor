@@ -1,0 +1,16 @@
+export { CollapsibleBlockComponent } from './collapsible-block.component';
+export { SprintStatsBlockComponent } from './sprint-stats-block.component';
+export { ExecutiveDashboardBlockComponent } from './executive-dashboard-block.component';
+export { VelocityBlockComponent } from './velocity-block.component';
+export { AssigneeLoadBlockComponent } from './assignee-load-block.component';
+export { ReleaseForecastBlockComponent } from './release-forecast-block.component';
+export { AddedAfterStartBlockComponent } from './added-after-start-block.component';
+export { AgingReportBlockComponent } from './aging-report-block.component';
+export { RiskDetectionBlockComponent } from './risk-detection-block.component';
+export { RetroReportBlockComponent } from './retro-report-block.component';
+export { AntipatternsBlockComponent } from './antipatterns-block.component';
+export { AiAnalysisBlockComponent } from './ai-analysis-block.component';
+export { AiAnswersBlockComponent } from './ai-answers-block.component';
+export { BlockedIssuesBlockComponent } from './blocked-issues-block.component';
+export { ReopenedIssuesBlockComponent } from './reopened-issues-block.component';
+export { IssuesListBlockComponent } from './issues-list-block.component';

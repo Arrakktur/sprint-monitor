@@ -1,77 +1,60 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpHeaders } from '@angular/common/http';
 import { JiraIssue } from './jira.service';
 import { MockJiraService } from './mock-jira.service';
-
-type AssigneeLoadStat = {
-  assignee: string;
-  totalClosedSp: number;
-  sprintsCount: number;
-  avgPerSprint: number;
-};
-
-type AgingMetrics = {
-  avgInProgressHours: number;
-  avgInReviewHours: number;
-  avgCycleTimeHours: number;
-  avgFlowEfficiency: number;
-};
-
-type RiskIssue = {
-  issue: JiraIssue;
-  reason: string;
-};
-
-type IssueAnalysis = {
-  issue: JiraIssue;
-  kind: 'bug' | 'feature' | 'tech_debt';
-  isTooLarge: boolean;
-  isPoorlyDescribed: boolean;
-  suggestions: string[];
-};
-
-type RetroReport = {
-  wentWell: string[];
-  wentBadly: string[];
-  failingTypes: {
-    kind: 'bug' | 'feature' | 'tech_debt';
-    failureRate: number;
-    total: number;
-  }[];
-  carryOverByAssignee: {
-    assignee: string;
-    carryOverSp: number;
-    sprintsCount: number;
-  }[];
-};
-
-type ReleaseForecast = {
-  remainingSp: number;
-  p50Sprints: number;
-  p80Sprints: number;
-  p50Date: Date;
-  p80Date: Date;
-};
-
-type ProcessAntipattern = {
-  title: string;
-  description: string;
-};
-
-type ExecutiveDashboard = {
-  deliveryPredictabilityPct: number;
-  predictabilityTrend: 'up' | 'down' | 'flat';
-  throughputPerSprint: number;
-  slaCompliancePct: number;
-  burnRatePerPerson: number;
-};
+import type {
+  AssigneeLoadStat,
+  AgingMetrics,
+  RiskIssue,
+  ExecutiveDashboard,
+  ReleaseForecast,
+  RetroReport,
+  ProcessAntipattern,
+  BlockedIssueWithDays,
+  IssueAnalysis
+} from './jira.types';
+import {
+  SprintStatsBlockComponent,
+  ExecutiveDashboardBlockComponent,
+  VelocityBlockComponent,
+  AssigneeLoadBlockComponent,
+  ReleaseForecastBlockComponent,
+  AddedAfterStartBlockComponent,
+  AgingReportBlockComponent,
+  RiskDetectionBlockComponent,
+  RetroReportBlockComponent,
+  AntipatternsBlockComponent,
+  AiAnalysisBlockComponent,
+  AiAnswersBlockComponent,
+  BlockedIssuesBlockComponent,
+  ReopenedIssuesBlockComponent,
+  IssuesListBlockComponent
+} from './blocks';
 
 @Component({
   selector: 'app-jira-issues',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [
+    CommonModule,
+    FormsModule,
+    SprintStatsBlockComponent,
+    ExecutiveDashboardBlockComponent,
+    VelocityBlockComponent,
+    AssigneeLoadBlockComponent,
+    ReleaseForecastBlockComponent,
+    AddedAfterStartBlockComponent,
+    AgingReportBlockComponent,
+    RiskDetectionBlockComponent,
+    RetroReportBlockComponent,
+    AntipatternsBlockComponent,
+    AiAnalysisBlockComponent,
+    AiAnswersBlockComponent,
+    BlockedIssuesBlockComponent,
+    ReopenedIssuesBlockComponent,
+    IssuesListBlockComponent
+  ],
   template: `
     <div class="jira-container">
       <h1>Jira задачи</h1>
@@ -98,450 +81,89 @@ type ExecutiveDashboard = {
       </div>
 
       <div *ngIf="!loading() && sprintStats().length" class="sprint-stats">
-        <h2>Статистика по спринтам</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Спринт</th>
-              <th>SP запланировано</th>
-              <th>SP закрыто</th>
-              <th>SP добавлено в середине</th>
-              <th>Carry-over %</th>
-              <th>% объёма добавлено</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let s of sprintStats()">
-              <td>{{ s.sprintName }}</td>
-              <td>{{ s.plannedSp }}</td>
-              <td>{{ s.closedSp }}</td>
-              <td>{{ s.addedMidSprintSp }}</td>
-              <td>{{ s.carryOverPercent }}%</td>
-              <td>{{ s.addedVolumePercent }}%</td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="sprint-selector">
+          <label for="sprint-select">Спринт</label>
+          <select
+            id="sprint-select"
+            [ngModel]="selectedSprint()"
+            (ngModelChange)="selectedSprint.set($event)"
+          >
+            <option [ngValue]="null">Все спринты</option>
+            <option *ngFor="let s of sprintStats()" [ngValue]="s.sprintName">
+              {{ s.sprintName }}
+            </option>
+          </select>
+          <span class="sprint-selector-hint" *ngIf="selectedSprint()">
+            Показаны данные по спринту «{{ selectedSprint() }}»
+          </span>
+        </div>
+
+        <app-sprint-stats-block
+          [stats]="sprintStatsToShow()"
+          [selectedSprint]="selectedSprint()"
+        />
 
         <div class="sprint-extra">
-          <div *ngIf="executiveDashboard()" class="assignee-block">
-            <h3>Executive Dashboard</h3>
-            <div class="velocity-grid">
-              <div>
-                <div class="metric-label">Delivery predictability</div>
-                <div class="metric-value">
-                  {{ executiveDashboard()!.deliveryPredictabilityPct | number : '1.0-0' }}%
-                </div>
-              </div>
-              <div>
-                <div class="metric-label">Predictability trend</div>
-                <div class="metric-value">
-                  {{
-                    executiveDashboard()!.predictabilityTrend === 'up'
-                      ? 'Улучшается'
-                      : executiveDashboard()!.predictabilityTrend === 'down'
-                        ? 'Ухудшается'
-                        : 'Стабильна'
-                  }}
-                </div>
-              </div>
-              <div>
-                <div class="metric-label">Throughput (SP/спринт)</div>
-                <div class="metric-value">
-                  {{ executiveDashboard()!.throughputPerSprint | number : '1.1-1' }}
-                </div>
-              </div>
-              <div>
-                <div class="metric-label">SLA соблюдение</div>
-                <div class="metric-value">
-                  {{ executiveDashboard()!.slaCompliancePct | number : '1.0-0' }}%
-                </div>
-              </div>
-              <div>
-                <div class="metric-label">Burn rate команды (SP/чел/спринт)</div>
-                <div class="metric-value">
-                  {{ executiveDashboard()!.burnRatePerPerson | number : '1.1-1' }}
-                </div>
-              </div>
-            </div>
-          </div>
+          <app-executive-dashboard-block [data]="executiveDashboard()" />
 
-          <div *ngIf="velocityStats()" class="velocity-block">
-            <h3>Velocity / Capacity planning</h3>
-            <div class="velocity-grid">
-              <div>
-                <div class="metric-label">Средняя velocity</div>
-                <div class="metric-value">{{ velocityStats()?.average }}</div>
-              </div>
-              <div>
-                <div class="metric-label">Стандартное отклонение</div>
-                <div class="metric-value">{{ velocityStats()?.stdDev }}</div>
-              </div>
-              <div>
-                <div class="metric-label">Тренд</div>
-                <div class="metric-value">
-                  {{
-                    velocityStats()?.trend === 'up'
-                      ? 'Растёт'
-                      : velocityStats()?.trend === 'down'
-                        ? 'Падает'
-                        : 'Стабильна'
-                  }}
-                </div>
-              </div>
-              <div>
-                <div class="metric-label">Прогноз на следующий спринт</div>
-                <div class="metric-value">{{ velocityStats()?.forecastNext }}</div>
-              </div>
-            </div>
+          <app-velocity-block
+            [velocity]="velocityStats()"
+            [aiForecast]="aiForecastText()"
+            [recommendedSp]="recommendedNextSprintSp()"
+          />
 
-            <div class="ai-forecast" *ngIf="aiForecastText()">
-              <div class="metric-label">AI-прогноз</div>
-              <div class="metric-value">{{ aiForecastText() }}</div>
-            </div>
+          <app-assignee-load-block
+            [load]="assigneeLoad()"
+            [overloaded]="overloadedAssignees()"
+            [underloaded]="underloadedAssignees()"
+          />
 
-            <div class="ai-forecast" *ngIf="recommendedNextSprintSp() !== null">
-              <div class="metric-label">Рекомендуемый объём следующего спринта</div>
-              <div class="metric-value">
-                {{ recommendedNextSprintSp() }} SP
-              </div>
-            </div>
+          <app-release-forecast-block [forecast]="releaseForecast()" />
 
-            <div class="velocity-history" *ngIf="velocityStats()?.history?.length">
-              <div class="metric-label">История по спринтам</div>
-              <ul>
-                <li *ngFor="let v of velocityStats()!.history">
-                  <span class="issue-key">{{ v.sprintName }}</span>
-                  <span class="issue-meta-small">Velocity: {{ v.velocity }}</span>
-                </li>
-              </ul>
-            </div>
-          </div>
+          <app-added-after-start-block [issues]="addedAfterStartIssues()" />
 
-          <div *ngIf="assigneeLoad().length" class="assignee-block">
-            <h3>Историческая загрузка по участникам</h3>
-            <table class="assignee-table">
-              <thead>
-                <tr>
-                  <th>Участник</th>
-                  <th>SP закрыто всего</th>
-                  <th>Спринтов участвовал</th>
-                  <th>Средняя загрузка / спринт</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr *ngFor="let a of assigneeLoad()">
-                  <td>{{ a.assignee }}</td>
-                  <td>{{ a.totalClosedSp }}</td>
-                  <td>{{ a.sprintsCount }}</td>
-                  <td>{{ a.avgPerSprint | number : '1.1-1' }}</td>
-                </tr>
-              </tbody>
-            </table>
+          <app-aging-report-block [metrics]="agingMetrics()" />
 
-            <div class="assignee-subblocks">
-              <div *ngIf="overloadedAssignees().length">
-                <h4>Стабильно перегружены</h4>
-                <ul>
-                  <li *ngFor="let a of overloadedAssignees()">
-                    <span class="issue-key">{{ a.assignee }}</span>
-                    <span class="issue-meta-small">
-                      Средняя загрузка: {{ a.avgPerSprint | number : '1.1-1' }} SP/спринт
-                    </span>
-                  </li>
-                </ul>
-              </div>
+          <app-risk-detection-block [issues]="riskIssues()" />
 
-              <div *ngIf="underloadedAssignees().length">
-                <h4>Недогружены</h4>
-                <ul>
-                  <li *ngFor="let a of underloadedAssignees()">
-                    <span class="issue-key">{{ a.assignee }}</span>
-                    <span class="issue-meta-small">
-                      Средняя загрузка: {{ a.avgPerSprint | number : '1.1-1' }} SP/спринт
-                    </span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </div>
+          <app-retro-report-block [report]="retroReport()" />
 
-          <div *ngIf="releaseForecast()" class="assignee-block">
-            <h3>Прогноз релиза</h3>
-            <div class="velocity-grid">
-              <div>
-                <div class="metric-label">Осталось в бэклоге</div>
-                <div class="metric-value">
-                  {{ releaseForecast()!.remainingSp }} SP
-                </div>
-              </div>
-              <div>
-                <div class="metric-label">P50 (медианный прогноз)</div>
-                <div class="metric-value">
-                  ~{{ releaseForecast()!.p50Sprints | number : '1.1-1' }} спринтов,
-                  до {{ releaseForecast()!.p50Date | date : 'dd.MM.yyyy' }}
-                </div>
-              </div>
-              <div>
-                <div class="metric-label">P80 (консервативный прогноз)</div>
-                <div class="metric-value">
-                  ~{{ releaseForecast()!.p80Sprints | number : '1.1-1' }} спринтов,
-                  до {{ releaseForecast()!.p80Date | date : 'dd.MM.yyyy' }}
-                </div>
-              </div>
-            </div>
-          </div>
+          <app-antipatterns-block [items]="processAntipatterns()" />
 
-          <div *ngIf="addedAfterStartIssues().length">
-            <h3>Задачи, добавленные после старта спринта</h3>
-            <ul>
-              <li *ngFor="let issue of addedAfterStartIssues()">
-                <span class="issue-key">{{ issue.key }}</span>
-                <span class="issue-summary">{{ issue.fields.summary }}</span>
-                <span class="issue-meta-small">
-                  SP: {{ issue.fields.storyPoints ?? 0 }},
-                  Спринт: {{ issue.fields.sprintName ?? 'Без спринта' }}
-                </span>
-              </li>
-            </ul>
-          </div>
+          <app-ai-analysis-block
+            [analyzed]="analyzedIssues"
+            [largeIssues]="largeIssues"
+            [poorlyDescribed]="poorlyDescribedIssues"
+          />
 
-          <div *ngIf="agingMetrics()" class="aging-block">
-            <h3>Aging Report</h3>
-            <div class="velocity-grid">
-              <div>
-                <div class="metric-label">Среднее время в работе</div>
-                <div class="metric-value">
-                  {{ agingMetrics()!.avgInProgressHours | number : '1.0-1' }} ч
-                </div>
-              </div>
-              <div>
-                <div class="metric-label">Среднее время в review</div>
-                <div class="metric-value">
-                  {{ agingMetrics()!.avgInReviewHours | number : '1.0-1' }} ч
-                </div>
-              </div>
-              <div>
-                <div class="metric-label">Средний cycle time</div>
-                <div class="metric-value">
-                  {{ agingMetrics()!.avgCycleTimeHours | number : '1.0-1' }} ч
-                </div>
-              </div>
-              <div>
-                <div class="metric-label">Flow efficiency (активная работа)</div>
-                <div class="metric-value">
-                  {{ (agingMetrics()!.avgFlowEfficiency * 100) | number : '1.0-0' }}%
-                </div>
-              </div>
-            </div>
-          </div>
+          @if (
+            aiWhySprintFailed() ||
+            aiNextSprintRisks().length ||
+            aiOverloadedPeople().length ||
+            aiLikelyMissedIssues().length
+          ) {
+            <app-ai-answers-block
+              [whyFailed]="aiWhySprintFailed()"
+              [risks]="aiNextSprintRisks()"
+              [overloaded]="aiOverloadedPeople()"
+              [likelyMissed]="aiLikelyMissedIssues()"
+            />
+          }
 
-          <div *ngIf="riskIssues().length" class="assignee-block">
-            <h3>Риск-детекция</h3>
-            <ul class="risk-list">
-              <li *ngFor="let r of riskIssues()">
-                <span class="issue-key">{{ r.issue.key }}</span>
-                <span class="issue-summary">{{ r.issue.fields.summary }}</span>
-                <span class="issue-meta-small">
-                  {{ r.reason }}
-                </span>
-              </li>
-            </ul>
-          </div>
+          <app-blocked-issues-block
+            [items]="blockedIssuesWithDays()"
+            [thresholdDays]="blockedThresholdDays"
+          />
 
-          <div *ngIf="retroReport()" class="assignee-block">
-            <h3>Ретроспективная аналитика</h3>
-
-            <div *ngIf="retroReport()!.wentWell.length">
-              <h4>Что пошло хорошо</h4>
-              <ul class="risk-list">
-                <li *ngFor="let item of retroReport()!.wentWell">
-                  <span class="issue-summary">{{ item }}</span>
-                </li>
-              </ul>
-            </div>
-
-            <div *ngIf="retroReport()!.wentBadly.length" style="margin-top: 8px">
-              <h4>Где просели</h4>
-              <ul class="risk-list">
-                <li *ngFor="let item of retroReport()!.wentBadly">
-                  <span class="issue-summary">{{ item }}</span>
-                </li>
-              </ul>
-            </div>
-
-            <div *ngIf="retroReport()!.failingTypes.length" style="margin-top: 8px">
-              <h4>Типы задач, которые чаще фейлятся</h4>
-              <ul class="risk-list">
-                <li *ngFor="let t of retroReport()!.failingTypes">
-                  <span class="issue-summary">
-                    {{ t.kind }} — {{ (t.failureRate * 100) | number : '1.0-0' }}% неуспешных
-                    ({{ t.total }} задач)
-                  </span>
-                </li>
-              </ul>
-            </div>
-
-            <div *ngIf="retroReport()!.carryOverByAssignee.length" style="margin-top: 8px">
-              <h4>Кто чаще создаёт carry-over</h4>
-              <ul class="risk-list">
-                <li *ngFor="let a of retroReport()!.carryOverByAssignee">
-                  <span class="issue-key">{{ a.assignee }}</span>
-                  <span class="issue-meta-small">
-                    Carry-over: {{ a.carryOverSp }} SP, спринтов: {{ a.sprintsCount }}
-                  </span>
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <div *ngIf="processAntipatterns().length" class="assignee-block">
-            <h3>Антипаттерны в процессах</h3>
-            <ul class="risk-list">
-              <li *ngFor="let p of processAntipatterns()">
-                <span class="issue-summary">{{ p.title }}</span>
-                <span class="issue-meta-small">
-                  {{ p.description }}
-                </span>
-              </li>
-            </ul>
-          </div>
-
-          <div *ngIf="analyzedIssues.length" class="assignee-block">
-            <h3>AI-анализ описаний задач</h3>
-
-            <div>
-              <h4>Авто-классификация (баг / фича / техдолг)</h4>
-              <ul class="risk-list">
-                <li *ngFor="let a of analyzedIssues">
-                  <span class="issue-key">{{ a.issue.key }}</span>
-                  <span class="issue-summary">{{ a.issue.fields.summary }}</span>
-                  <span class="issue-meta-small">Тип: {{ a.kind }}</span>
-                </li>
-              </ul>
-            </div>
-
-            <div *ngIf="largeIssues.length" style="margin-top: 8px">
-              <h4>Слишком большие задачи</h4>
-              <ul class="risk-list">
-                <li *ngFor="let a of largeIssues">
-                  <span class="issue-key">{{ a.issue.key }}</span>
-                  <span class="issue-summary">{{ a.issue.fields.summary }}</span>
-                  <span class="issue-meta-small">
-                    {{ a.suggestions[0] || 'Рекомендуется разбить на более мелкие задачи.' }}
-                  </span>
-                </li>
-              </ul>
-            </div>
-
-            <div *ngIf="poorlyDescribedIssues.length" style="margin-top: 8px">
-              <h4>Плохо описанные задачи</h4>
-              <ul class="risk-list">
-                <li *ngFor="let a of poorlyDescribedIssues">
-                  <span class="issue-key">{{ a.issue.key }}</span>
-                  <span class="issue-summary">{{ a.issue.fields.summary }}</span>
-                  <span class="issue-meta-small">
-                    {{ a.suggestions[1] || 'Нужно дополнить описание: цель, критерии готовности.' }}
-                  </span>
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <div
-            *ngIf="
-              aiWhySprintFailed() ||
-              aiNextSprintRisks().length ||
-              aiOverloadedPeople().length ||
-              aiLikelyMissedIssues().length
-            "
-            class="assignee-block"
-          >
-            <h3>AI-ответы по спринту</h3>
-
-            <div *ngIf="aiWhySprintFailed()">
-              <h4>Почему этот спринт провалился?</h4>
-              <p class="issue-meta-small">
-                {{ aiWhySprintFailed() }}
-              </p>
-            </div>
-
-            <div *ngIf="aiNextSprintRisks().length" style="margin-top: 8px">
-              <h4>Какие риски в следующем спринте?</h4>
-              <ul class="risk-list">
-                <li *ngFor="let r of aiNextSprintRisks()">
-                  <span class="issue-summary">{{ r }}</span>
-                </li>
-              </ul>
-            </div>
-
-            <div *ngIf="aiOverloadedPeople().length" style="margin-top: 8px">
-              <h4>Кто перегружен?</h4>
-              <ul class="risk-list">
-                <li *ngFor="let p of aiOverloadedPeople()">
-                  <span class="issue-summary">{{ p }}</span>
-                </li>
-              </ul>
-            </div>
-
-            <div *ngIf="aiLikelyMissedIssues().length" style="margin-top: 8px">
-              <h4>Какие задачи с высокой вероятностью не успеем?</h4>
-              <ul class="risk-list">
-                <li *ngFor="let issue of aiLikelyMissedIssues()">
-                  <span class="issue-key">{{ issue.key }}</span>
-                  <span class="issue-summary">{{ issue.fields.summary }}</span>
-                  <span class="issue-meta-small">
-                    SP: {{ issue.fields.storyPoints ?? 0 }},
-                    статус: {{ issue.fields.status?.name || 'unknown' }}
-                  </span>
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <div *ngIf="blockedLongIssues().length">
-            <h3>Задачи в статусе Blocked &gt; {{ blockedThresholdDays }} дней</h3>
-            <ul>
-              <li *ngFor="let issue of blockedLongIssues()">
-                <span class="issue-key">{{ issue.key }}</span>
-                <span class="issue-summary">{{ issue.fields.summary }}</span>
-                <span class="issue-meta-small">
-                  Заблокирована с: {{ issue.fields.blockedSince }},
-                  дней: {{ daysBlocked(issue) }}
-                </span>
-              </li>
-            </ul>
-          </div>
-
-          <div *ngIf="frequentlyReopenedIssues().length">
-            <h3>Часто переоткрываемые задачи</h3>
-            <ul>
-              <li *ngFor="let issue of frequentlyReopenedIssues()">
-                <span class="issue-key">{{ issue.key }}</span>
-                <span class="issue-summary">{{ issue.fields.summary }}</span>
-                <span class="issue-meta-small">
-                  Переоткрытий: {{ issue.fields.reopenCount ?? 0 }}
-                </span>
-              </li>
-            </ul>
-          </div>
+          <app-reopened-issues-block [issues]="frequentlyReopenedIssues()" />
         </div>
       </div>
 
-      <div *ngIf="!loading() && issues().length">
-        <h2>Найдено задач: {{ issues().length }}</h2>
-        <ul class="issues-list">
-          <li *ngFor="let issue of issues()">
-            <div class="issue-key">{{ issue.key }}</div>
-            <div class="issue-summary">{{ issue.fields.summary }}</div>
-            <div class="issue-meta">
-              <span *ngIf="issue.fields.status">Статус: {{ issue.fields.status?.name }}</span>
-              <span *ngIf="issue.fields.assignee">
-                · Исполнитель: {{ issue.fields.assignee.displayName }}
-              </span>
-            </div>
-          </li>
-        </ul>
-      </div>
+      <app-issues-list-block
+        *ngIf="!loading() && filteredIssues().length"
+        [issues]="filteredIssues()"
+        [selectedSprint]="selectedSprint()"
+      />
     </div>
   `,
   styles: [
@@ -642,6 +264,30 @@ type ExecutiveDashboard = {
         border-top: 1px solid #e5e7eb;
       }
 
+      .sprint-selector {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .sprint-selector select {
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid #cbd5f5;
+        font-size: 14px;
+        min-width: 180px;
+      }
+
+      .sprint-selector-hint {
+        font-size: 12px;
+        color: #6b7280;
+      }
+
+      .selected-row {
+        background: #dbeafe !important;
+      }
+
       .sprint-stats table {
         width: 100%;
         border-collapse: collapse;
@@ -672,222 +318,6 @@ type ExecutiveDashboard = {
         grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
         gap: 16px;
       }
-
-      .velocity-block {
-        padding: 8px 10px;
-        border-radius: 10px;
-        border: 1px solid #e5e7eb;
-        background: #f9fafb;
-      }
-
-      .velocity-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 8px 12px;
-        margin-top: 6px;
-        font-size: 12px;
-      }
-
-      .metric-label {
-        font-size: 11px;
-        color: #6b7280;
-      }
-
-      .metric-value {
-        font-size: 14px;
-        font-weight: 600;
-        color: #111827;
-      }
-
-      .velocity-history {
-        margin-top: 8px;
-      }
-
-      .velocity-history ul {
-        list-style: none;
-        padding: 0;
-        margin: 4px 0 0;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-
-      .velocity-history li {
-        padding: 4px 6px;
-        border-radius: 6px;
-        background: #ffffff;
-        border: 1px solid #e5e7eb;
-      }
-
-      .ai-forecast {
-        margin-top: 8px;
-      }
-
-      .assignee-block {
-        padding: 8px 10px;
-        border-radius: 10px;
-        border: 1px solid #e5e7eb;
-        background: #f9fafb;
-      }
-
-      .assignee-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 8px;
-        font-size: 12px;
-      }
-
-      .assignee-table th,
-      .assignee-table td {
-        padding: 6px 8px;
-        text-align: left;
-        border-bottom: 1px solid #e5e7eb;
-      }
-
-      .assignee-table th {
-        font-weight: 600;
-        color: #374151;
-        background: #f3f4f6;
-      }
-
-      .assignee-table tbody tr:last-child td {
-        border-bottom: none;
-      }
-
-      .assignee-subblocks {
-        margin-top: 10px;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: 8px;
-      }
-
-      .assignee-subblocks h4 {
-        margin: 0 0 4px;
-        font-size: 13px;
-        font-weight: 600;
-        color: #111827;
-      }
-
-      .assignee-subblocks ul {
-        list-style: none;
-        padding: 0;
-        margin: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-
-      .assignee-subblocks li {
-        padding: 4px 6px;
-        border-radius: 6px;
-        border: 1px solid #e5e7eb;
-        background: #ffffff;
-      }
-
-      .aging-block {
-        padding: 8px 10px;
-        border-radius: 10px;
-        border: 1px solid #e5e7eb;
-        background: #f9fafb;
-      }
-
-      .risk-list {
-        list-style: none;
-        padding: 0;
-        margin: 8px 0 0;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-
-      .risk-list li {
-        padding: 6px 8px;
-        border-radius: 8px;
-        border: 1px solid #e5e7eb;
-        background: #fef2f2;
-        font-size: 12px;
-      }
-
-      .sprint-extra h3 {
-        margin: 0 0 8px;
-        font-size: 14px;
-        font-weight: 600;
-        color: #111827;
-      }
-
-      .sprint-extra ul {
-        list-style: none;
-        padding: 0;
-        margin: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-
-      .sprint-extra li {
-        padding: 6px 8px;
-        border-radius: 8px;
-        border: 1px solid #e5e7eb;
-        background: #f9fafb;
-        font-size: 12px;
-      }
-
-      .issue-meta-small {
-        display: block;
-        margin-top: 2px;
-        font-size: 11px;
-        color: #6b7280;
-      }
-
-      .issues-list {
-        list-style: none;
-        padding: 0;
-        margin: 16px 0 0;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-
-      .issues-list li {
-        padding: 10px 12px;
-        border-radius: 10px;
-        border: 1px solid #e5e7eb;
-        background: #f9fafb;
-        display: grid;
-        grid-template-columns: minmax(120px, 160px) 1fr;
-        grid-template-rows: auto auto;
-        column-gap: 12px;
-        row-gap: 4px;
-        font-size: 13px;
-      }
-
-      .issue-key {
-        grid-row: 1 / 3;
-        align-self: center;
-        font-weight: 600;
-        color: #1d4ed8;
-      }
-
-      .issue-summary {
-        font-weight: 500;
-        color: #111827;
-      }
-
-      .issue-meta {
-        font-size: 12px;
-        color: #6b7280;
-      }
-
-      .issue-meta span + span::before {
-        content: '';
-        display: inline-block;
-        width: 4px;
-        height: 4px;
-        border-radius: 999px;
-        background: #d1d5db;
-        margin: 0 6px;
-        vertical-align: middle;
-      }
     `
   ]
 })
@@ -896,6 +326,7 @@ export class JiraIssuesComponent {
 
   readonly jql = signal<string>('project = YOURPROJECT ORDER BY created DESC');
   readonly issues = signal<JiraIssue[]>([]);
+  readonly selectedSprint = signal<string | null>(null);
   readonly sprintStats = signal<
     {
       sprintName: string;
@@ -915,20 +346,47 @@ export class JiraIssuesComponent {
   } | null>(null);
   readonly aiForecastText = signal<string | null>(null);
   readonly recommendedNextSprintSp = signal<number | null>(null);
-  readonly assigneeLoad = signal<AssigneeLoadStat[]>([]);
-  readonly overloadedAssignees = signal<AssigneeLoadStat[]>([]);
-  readonly underloadedAssignees = signal<AssigneeLoadStat[]>([]);
-  readonly agingMetrics = signal<AgingMetrics | null>(null);
-  readonly riskIssues = signal<RiskIssue[]>([]);
-  readonly issueAnalysis = signal<IssueAnalysis[]>([]);
+  readonly assigneeLoad = computed(() =>
+    this.calculateAssigneeLoad(this.filteredIssues())
+  );
+  readonly overloadedAssignees = computed(() =>
+    this.classifyAssigneeLoad(this.assigneeLoad()).overloaded
+  );
+  readonly underloadedAssignees = computed(() =>
+    this.classifyAssigneeLoad(this.assigneeLoad()).underloaded
+  );
+  readonly agingMetrics = computed(() => this.calculateAgingMetrics(this.filteredIssues()));
+  readonly riskIssues = computed(() => this.detectRiskIssues(this.filteredIssues()));
+  readonly issueAnalysis = computed(() => this.analyzeIssues(this.filteredIssues()));
   readonly retroReport = signal<RetroReport | null>(null);
   readonly releaseForecast = signal<ReleaseForecast | null>(null);
   readonly processAntipatterns = signal<ProcessAntipattern[]>([]);
   readonly executiveDashboard = signal<ExecutiveDashboard | null>(null);
-  readonly aiWhySprintFailed = signal<string | null>(null);
+  readonly aiWhySprintFailed = computed(() => {
+    const stats = this.sprintStats();
+    const sel = this.selectedSprint();
+    const statsToUse = sel
+      ? stats.filter((s) => s.sprintName === sel)
+      : stats;
+    if (!statsToUse.length) return null;
+    return this.buildWhySprintFailedAnswer(
+      statsToUse,
+      this.filteredIssues(),
+      this.velocityStats(),
+      this.riskIssues(),
+      this.issueAnalysis()
+    );
+  });
   readonly aiNextSprintRisks = signal<string[]>([]);
-  readonly aiOverloadedPeople = signal<string[]>([]);
-  readonly aiLikelyMissedIssues = signal<JiraIssue[]>([]);
+  readonly aiOverloadedPeople = computed(() =>
+    this.buildOverloadedPeopleAnswer(
+      this.assigneeLoad(),
+      this.overloadedAssignees()
+    )
+  );
+  readonly aiLikelyMissedIssues = computed(() =>
+    this.detectLikelyMissedIssues(this.filteredIssues())
+  );
 
   get analyzedIssues(): IssueAnalysis[] {
     return this.issueAnalysis();
@@ -941,9 +399,36 @@ export class JiraIssuesComponent {
   get poorlyDescribedIssues(): IssueAnalysis[] {
     return this.issueAnalysis().filter((a) => a.isPoorlyDescribed);
   }
-  readonly addedAfterStartIssues = signal<JiraIssue[]>([]);
-  readonly blockedLongIssues = signal<JiraIssue[]>([]);
-  readonly frequentlyReopenedIssues = signal<JiraIssue[]>([]);
+
+  readonly filteredIssues = computed(() => {
+    const issues = this.issues();
+    const sel = this.selectedSprint();
+    if (!sel) return issues;
+    return issues.filter((i) => (i.fields.sprintName ?? 'Без спринта') === sel);
+  });
+
+  readonly sprintStatsToShow = computed(() => {
+    const stats = this.sprintStats();
+    const sel = this.selectedSprint();
+    if (!sel) return stats;
+    return stats.filter((s) => s.sprintName === sel);
+  });
+
+  readonly addedAfterStartIssues = computed(() =>
+    this.findAddedAfterStartIssues(this.filteredIssues())
+  );
+  readonly blockedLongIssues = computed(() =>
+    this.findBlockedLongIssues(this.filteredIssues(), this.blockedThresholdDays)
+  );
+  readonly frequentlyReopenedIssues = computed(() =>
+    this.findFrequentlyReopenedIssues(this.filteredIssues())
+  );
+  readonly blockedIssuesWithDays = computed(() =>
+    this.blockedLongIssues().map((issue) => ({
+      issue,
+      daysBlocked: this.daysBlocked(issue)
+    }))
+  );
   readonly blockedThresholdDays = 3;
   readonly loading = signal<boolean>(false);
   readonly error = signal<string | null>(null);
@@ -965,18 +450,11 @@ export class JiraIssuesComponent {
         const velocity = this.calculateVelocityMetrics(stats);
         this.velocityStats.set(velocity);
         const assigneeLoad = this.calculateAssigneeLoad(issues);
-        this.assigneeLoad.set(assigneeLoad);
-        const { overloaded, underloaded } = this.classifyAssigneeLoad(assigneeLoad);
-        this.overloadedAssignees.set(overloaded);
-        this.underloadedAssignees.set(underloaded);
         this.aiForecastText.set(this.buildAiForecastText(velocity, assigneeLoad));
         this.recommendedNextSprintSp.set(
           this.calculateRecommendedNextSprintSp(velocity, assigneeLoad, issues)
         );
-        this.agingMetrics.set(this.calculateAgingMetrics(issues));
-        this.riskIssues.set(this.detectRiskIssues(issues));
         const analysis = this.analyzeIssues(issues);
-        this.issueAnalysis.set(analysis);
         this.retroReport.set(this.calculateRetroReport(stats, issues, velocity, assigneeLoad, analysis));
         this.releaseForecast.set(this.calculateReleaseForecast(issues, velocity));
         this.processAntipatterns.set(
@@ -985,19 +463,9 @@ export class JiraIssuesComponent {
         this.executiveDashboard.set(
           this.calculateExecutiveDashboard(stats, issues, velocity, assigneeLoad)
         );
-        this.aiWhySprintFailed.set(
-          this.buildWhySprintFailedAnswer(stats, issues, velocity, this.riskIssues(), analysis)
-        );
         this.aiNextSprintRisks.set(
-          this.buildNextSprintRisksAnswer(this.processAntipatterns(), this.releaseForecast(), this.riskIssues())
+          this.buildNextSprintRisksAnswer(this.processAntipatterns(), this.releaseForecast(), this.detectRiskIssues(issues))
         );
-        this.aiOverloadedPeople.set(
-          this.buildOverloadedPeopleAnswer(assigneeLoad, this.overloadedAssignees())
-        );
-        this.aiLikelyMissedIssues.set(this.detectLikelyMissedIssues(issues));
-        this.addedAfterStartIssues.set(this.findAddedAfterStartIssues(issues));
-        this.blockedLongIssues.set(this.findBlockedLongIssues(issues, this.blockedThresholdDays));
-        this.frequentlyReopenedIssues.set(this.findFrequentlyReopenedIssues(issues));
         this.loading.set(false);
       },
       error: (err) => {
