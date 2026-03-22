@@ -167,16 +167,12 @@ import {
       />
 
       <div class="pagination">
-        <button *ngFor = "let page of pages()" (click)="currentPage.set(page)">
-          {{page + 1 }}
-        </button>
-
+        @for ( page of pages(); track page) {
+          <button (click)="setPage(page)">
+            {{page +1}}
+          </button>        }
 
       </div>
-
-      <!--        *ngIf="!loading() && filteredIssues().length"-->
-      <!--        [issues]="filteredIssues()"-->
-      <!--        [selectedSprint]="selectedSprint()"-->
     </div>
   `,
   styles: [
@@ -338,6 +334,11 @@ export class JiraIssuesComponent {
   private readonly jiraService = inject(MockJiraService);
 
   // Начал отсюда
+
+  setPage(page: number) {
+    this.currentPage.set(page);
+  }
+
   readonly currentPage = signal(0);
   readonly itemsPerPage = 10;
 
