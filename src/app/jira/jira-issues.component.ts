@@ -160,10 +160,19 @@ import {
       </div>
 
       <app-issues-list-block
-        *ngIf="!loading() && filteredIssues().length"
-        [issues]="filteredIssues()"
-        [selectedSprint]="selectedSprint()"
+
+            *ngIf="!loading() && filteredIssues().length"
+            [issues]="pagedIssues()"
+            [selectedSprint]="selectedSprint()"
       />
+
+      <div class="pagination">
+        @for ( page of pages(); track page) {
+          <button (click)="setPage(page)">
+            {{page +1}}
+          </button>        }
+
+      </div>
     </div>
   `,
   styles: [
@@ -323,6 +332,36 @@ import {
 })
 export class JiraIssuesComponent {
   private readonly jiraService = inject(MockJiraService);
+
+  // Начал отсюда
+
+  setPage(page: number) {
+    this.currentPage.set(page);
+  }
+
+  readonly currentPage = signal(0);
+  readonly itemsPerPage = 10;
+
+
+  readonly pagedIssues = computed(()=> {
+    const all = this.filteredIssues();
+    const page = this.currentPage();
+    const startIndex = page * this.itemsPerPage;
+    const endIndex = startIndex + this.itemsPerPage;
+
+    return all.slice(startIndex, endIndex);
+
+  });
+  readonly totalPages = computed (() => {
+    return Math.ceil(this.filteredIssues().length / this.itemsPerPage);
+  })
+  readonly pages = computed (() => {
+    return Array.from({length: this.totalPages()}, (_, i) => i);
+  });
+
+  // Дальше пока ничего не трогал
+
+
 
   readonly jql = signal<string>('project = YOURPROJECT ORDER BY created DESC');
   readonly issues = signal<JiraIssue[]>([]);
