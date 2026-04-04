@@ -1,5 +1,5 @@
-import { Component, inject, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, signal, computed, OnInit } from '@angular/core';
+import { CommonModule} from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpHeaders } from '@angular/common/http';
 import { JiraIssue } from './jira.service';
@@ -31,8 +31,11 @@ import {
   AiAnswersBlockComponent,
   BlockedIssuesBlockComponent,
   ReopenedIssuesBlockComponent,
-  IssuesListBlockComponent
+  IssuesListBlockComponent,
+  CollapsibleBlockComponent
 } from './blocks';
+import { list } from 'postcss';
+// import { p } from 'vitest/dist/chunks/reporters.d.CWXNI2jG';
 
 @Component({
   selector: 'app-jira-issues',
@@ -54,7 +57,8 @@ import {
     AiAnswersBlockComponent,
     BlockedIssuesBlockComponent,
     ReopenedIssuesBlockComponent,
-    IssuesListBlockComponent
+    IssuesListBlockComponent,
+    CollapsibleBlockComponent,
   ],
   template: `
     <div class="jira-container">
@@ -94,86 +98,143 @@ import {
               {{ s.sprintName }}
             </option>
           </select>
+
           <span class="sprint-selector-hint" *ngIf="selectedSprint()">
             Показаны данные по спринту «{{ selectedSprint() }}»
           </span>
         </div>
 
-        <app-sprint-stats-block
-          [stats]="sprintStatsToShow()"
-          [selectedSprint]="selectedSprint()"
-        />
+        <div class="block-selector">
+
+          <app-collapsible-block>
+
+            <h2 header> Фильтр по компонентам</h2>
+            <div class="blocks-header">
+
+              <button (click)="toggleAllBlocks()">
+
+                {{areAllBlocksVisible() ? 'Снять всё' : 'Выбрать всё'}}
+
+              </button>
+            </div>
+            <div>Выберите один или несколько компонентов:</div>
+
+
+          @for (b of blocks; track b.key){
+            <label>
+              <input type="checkbox"
+              [(ngModel)]="b.visible"
+              (ngModelChange)="saveBlocks()"
+
+              />
+              {{b.label}}
+            </label>
+          }
+          </app-collapsible-block>
+        </div>
+
+        @if (isVisible('sprintStats')) {
+          <app-sprint-stats-block
+            [stats]="sprintStatsToShow()"
+            [selectedSprint]="selectedSprint()"
+          />
+
+        }
 
         <div class="sprint-extra">
-          <app-executive-dashboard-block [data]="executiveDashboard()" />
+          @if (isVisible('dashboard')) {
+            <app-executive-dashboard-block [data]="executiveDashboard()" />
+          }
 
-          <app-velocity-block
+          @if (isVisible('velocity')) {
+
+            <app-velocity-block
             [velocity]="velocityStats()"
             [aiForecast]="aiForecastText()"
             [recommendedSp]="recommendedNextSprintSp()"
-          />
+            />
+          }
 
-          <app-assignee-load-block
-            [load]="assigneeLoad()"
-            [overloaded]="overloadedAssignees()"
-            [underloaded]="underloadedAssignees()"
-          />
+          @if (isVisible('assignee-load')) {
+            <app-assignee-load-block
+              [load]="assigneeLoad()"
+              [overloaded]="overloadedAssignees()"
+              [underloaded]="underloadedAssignees()"
+            />
+          }
 
-          <app-release-forecast-block [forecast]="releaseForecast()" />
+          @if (isVisible('release-forecast')) {
+            <app-release-forecast-block [forecast]="releaseForecast()" />
+          }
 
-          <app-added-after-start-block [issues]="addedAfterStartIssues()" />
+          @if (isVisible('added-after-start')){
+            <app-added-after-start-block [issues]="addedAfterStartIssues()" />
+          }
+          @if (isVisible('aging-report')){
+            <app-aging-report-block [metrics]="agingMetrics()" />
+          }
+          @if (isVisible('risk-detection')) {
+            <app-risk-detection-block [issues]="riskIssues()" />
+          }
+          @if (isVisible('retro-report')) {
+            <app-retro-report-block [report]="retroReport()" />
+          }
+          @if (isVisible('antipatterns')) {
+            <app-antipatterns-block [items]="processAntipatterns()" />
+          }
 
-          <app-aging-report-block [metrics]="agingMetrics()" />
-
-          <app-risk-detection-block [issues]="riskIssues()" />
-
-          <app-retro-report-block [report]="retroReport()" />
-
-          <app-antipatterns-block [items]="processAntipatterns()" />
-
-          <app-ai-analysis-block
-            [analyzed]="analyzedIssues"
-            [largeIssues]="largeIssues"
-            [poorlyDescribed]="poorlyDescribedIssues"
-          />
-
+          @if (isVisible('ai')) {
+            <app-ai-analysis-block
+              [analyzed]="analyzedIssues"
+              [largeIssues]="largeIssues"
+              [poorlyDescribed]="poorlyDescribedIssues"
+            />
+          }
           @if (
             aiWhySprintFailed() ||
             aiNextSprintRisks().length ||
             aiOverloadedPeople().length ||
             aiLikelyMissedIssues().length
           ) {
-            <app-ai-answers-block
-              [whyFailed]="aiWhySprintFailed()"
-              [risks]="aiNextSprintRisks()"
-              [overloaded]="aiOverloadedPeople()"
-              [likelyMissed]="aiLikelyMissedIssues()"
+            @if (isVisible('ai-answer')) {
+              <app-ai-answers-block
+                [whyFailed]="aiWhySprintFailed()"
+                [risks]="aiNextSprintRisks()"
+                [overloaded]="aiOverloadedPeople()"
+                [likelyMissed]="aiLikelyMissedIssues()"
+              />
+            }
+
+          }
+          @if (isVisible('blocked-issues')) {
+            <app-blocked-issues-block
+              [items]="blockedIssuesWithDays()"
+              [thresholdDays]="blockedThresholdDays"
             />
           }
 
-          <app-blocked-issues-block
-            [items]="blockedIssuesWithDays()"
-            [thresholdDays]="blockedThresholdDays"
-          />
-
-          <app-reopened-issues-block [issues]="frequentlyReopenedIssues()" />
         </div>
       </div>
+      @if (isVisible('reopened-issues')) {
+        <app-reopened-issues-block [issues]="frequentlyReopenedIssues()" />
+      }
+      @if (isVisible('issues-list')) {
+        <app-issues-list-block
 
-      <app-issues-list-block
+          *ngIf="!loading() && filteredIssues().length"
+          [issues]="pagedIssues()"
+        />
+<!--        [selectedSprint]="selectedSprint()"-->
 
-            *ngIf="!loading() && filteredIssues().length"
-            [issues]="pagedIssues()"
-            [selectedSprint]="selectedSprint()"
-      />
+        <div class="pagination">
+          @for ( page of pages(); track page) {
+            <button (click)="setPage(page)">
+              {{page +1}}
+            </button>        }
 
-      <div class="pagination">
-        @for ( page of pages(); track page) {
-          <button (click)="setPage(page)">
-            {{page +1}}
-          </button>        }
+        </div>
+      }
 
-      </div>
     </div>
   `,
   styles: [
@@ -331,9 +392,66 @@ import {
     `
   ]
 })
-export class JiraIssuesComponent {
+export class JiraIssuesComponent implements OnInit {
   private readonly jiraService = inject(MockJiraService);
   private readonly analytics = inject(JiraAnalyticsService);
+
+  ngOnInit(): void {
+    const saved = localStorage.getItem("blocks");
+    if (saved) {
+      const parsed = JSON.parse(saved);
+
+      this.blocks.forEach(b=> {
+        const found = parsed.find((p: any) => p.key === b.key);
+      if (found) {
+        b.visible = found.visible;
+        }
+      });
+    }
+  }
+
+
+areAllBlocksVisible(): boolean {
+  return this.blocks.every(b => b.visible);
+}
+
+  blocks = [
+    { key: 'sprintStats', label: 'Статистика по спринтам', visible: true },
+    { key: 'ai', label: 'Ai анализз', visible: true },
+    { key: 'velocity', label: 'Velocity', visible: true },
+    { key: 'dashboard', label: 'Executive Dashboard', visible: true },
+    { key: 'release-forecast', label: 'Прогноз релиза', visible: true },
+    { key: 'added-after-start', label: 'Задачи, добавленные после спринта', visible: true },
+    { key: 'aging-report', label: 'Aging report', visible: true },
+    { key: 'risk-detection', label: 'Риск детекция', visible: true },
+    { key: 'retro-report', label: 'Ретроспективная аналитика', visible: true },
+    { key: 'antipatterns', label: 'Антипаттерны в процессах', visible: true },
+    { key: 'assignee-load', label: 'Историческая загрузка по участникам', visible: true },
+    { key: 'ai-answer', label: 'Ai ответы по спринту', visible: true },
+    { key: 'reopened-issues', label: 'Часто открываемые задачи', visible: true },
+    { key: 'blocked-issues', label: 'Задачи в статусе Blocked', visible: true },
+    { key: 'issues-list', label: 'Задачи по спринту', visible: true },
+  ]
+
+  isVisible (key: string): boolean {
+    return this.blocks.find(b => b.key === key)?.visible || false;
+
+  }
+
+  toggleAllBlocks():void {
+    const allSelected = this.blocks.every(b=> b.visible);
+
+    this.blocks.forEach(b=> {
+      b.visible = !allSelected;
+      // b.visible = !b.visible;
+    });
+
+    this.saveBlocks()
+  }
+
+  saveBlocks(): void {
+    localStorage.setItem('blocks', JSON.stringify(this.blocks));
+  }
 
   setPage(page: number) {
     this.currentPage.set(page);
@@ -526,5 +644,6 @@ export class JiraIssuesComponent {
     });
   }
 
+  protected readonly list = list;
 }
 
