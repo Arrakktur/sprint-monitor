@@ -117,11 +117,11 @@ import { list } from 'postcss';
 
               </button>
             </div>
-            <div>Выберите один или несколько компонентов:</div>
+            <div class="block-select">Выберите один или несколько компонентов:</div>
 
-
+            <div class="block-list">
           @for (b of blocks; track b.key){
-            <label>
+            <label class="block-item">
               <input type="checkbox"
               [(ngModel)]="b.visible"
               (ngModelChange)="saveBlocks()"
@@ -130,6 +130,7 @@ import { list } from 'postcss';
               {{b.label}}
             </label>
           }
+            </div>
           </app-collapsible-block>
         </div>
 
@@ -389,6 +390,25 @@ import { list } from 'postcss';
         grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
         gap: 16px;
       }
+
+      .block-list {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px 12px;
+        /*display: flex;*/
+        /*align-items: flex-start;*/
+        /*gap: 6px;*/
+      }
+
+      .block-select {
+        margin: 10px 0;
+      }
+
+      .block-item {
+        cursor: pointer;
+
+      }
+
     `
   ]
 })
